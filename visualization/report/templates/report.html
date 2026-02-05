@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>弹幕分析报告</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, \"Noto Sans\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", sans-serif; margin: 24px; }
+      h1, h2 { margin: 0 0 12px 0; }
+      .meta { color: #6b7280; margin-bottom: 20px; }
+      .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+      ul { margin: 0; padding-left: 18px; }
+      code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>弹幕分析报告</h1>
+    <div class="meta">platform=<code>{{ platform }}</code> video_id=<code>{{ video_id }}</code></div>
+
+    <div class="card">
+      <h2>高能片段</h2>
+      {% set peaks = summaries.get('high_energy_segments', {}).get('segments', []) %}
+      {% if peaks %}
+      <ul>
+        {% for p in peaks %}
+        <li>{{ p.start_sec }}秒 ~ {{ p.end_sec }}秒（峰值弹幕量：{{ p.peak_count }}）</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div>暂无</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>热词</h2>
+      {% set kws = summaries.get('top_keywords', {}).get('items', []) %}
+      {% if kws %}
+      <ul>
+        {% for it in kws[:30] %}
+        <li>{{ it.token }} ({{ it.count }})</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div>暂无</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>用户活跃</h2>
+      {% set ua = summaries.get('user_activity', {}) %}
+      <div>独立用户数：{{ ua.get('unique_users', 0) }}</div>
+      <div>Top10占比：{{ '%.2f' % (ua.get('top10_share', 0.0) * 100) }}%</div>
+    </div>
+
+    <div class="card">
+      <h2>指标说明</h2>
+      <div style="color:#374151; line-height:1.6;">
+        <div>情感分析：基于分词与情绪词典规则，输出正向/负向/中性；“占比趋势”表示每个时间桶里该情绪占全部弹幕的比例。</div>
+        <div>用户活跃：独立用户数是去重后的发言用户数；Top10占比表示最活跃的10个用户贡献的弹幕比例，用来衡量是否被少数人“刷屏”。</div>
+        <div>用户分层：normal=普通用户（2~9条弹幕且重复率不高）；active=活跃用户（10~49条）；heavy=重度用户（≥50条）；low=低频用户（0~1条）；repeat_suspect=疑似重复刷屏；spam_suspect=疑似刷屏账号（高频且重复率偏高）。</div>
+        <div>认知负荷（词数/秒）：每10秒桶内的分词总数除以10，反映信息密度；信息熵反映词的多样性与均衡程度（越高越“内容丰富”）。</div>
+        <div>热词突增：某个词在短时间内突然大量出现的现象，用“突增强度”排序；常用于发现“梗”“名场面”。</div>
+        <div>提及网络：识别“@某人”的提及关系，统计提及最多的用户与被提及最多的对象。</div>
+        <div>弹幕类型：基于B站弹幕模式（滚动/顶部/底部/其他）的占比。</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>弹幕类型分布</h2>
+      {% set td = summaries.get('danmu_type_distribution', {}) %}
+      {% set items = td.get('items', []) %}
+      {% if items %}
+      <ul>
+        {% for it in items %}
+        <li>{{ it.type }} ({{ it.count }})</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div>暂无</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>提及网络（@）</h2>
+      {% set mn = summaries.get('danmu_mention_network', {}) %}
+      <div>提及关系数：{{ mn.get('edges', 0) }} | 提及用户数：{{ mn.get('unique_senders', 0) }} | 被提及对象数：{{ mn.get('unique_targets', 0) }}</div>
+      {% set top_targets = mn.get('top_targets', []) %}
+      {% if top_targets %}
+      <div style="margin-top: 8px;">被提及最多的对象（部分）</div>
+      <ul>
+        {% for it in top_targets[:15] %}
+        <li>{{ it.target }}（被提及次数：{{ it.in_mentions }}）</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div style="margin-top: 8px;">暂无</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>热词突增（burst）</h2>
+      {% set bursts = summaries.get('danmu_bursty_tokens', {}).get('items', []) %}
+      {% if bursts %}
+      <ul>
+        {% for it in bursts[:20] %}
+        <li>{{ it.token }}（突增强度：{{ '%.2f' % it.z_score }}，峰值次数：{{ it.peak_count }}）</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div>暂无</div>
+      {% endif %}
+    </div>
+  </body>
+</html>

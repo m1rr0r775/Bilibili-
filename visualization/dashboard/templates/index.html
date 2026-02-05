@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>弹幕分析仪表盘</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2/dist/echarts-wordcloud.min.js"></script>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, \"Noto Sans\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", sans-serif; margin: 16px; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+      .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; }
+      .chart { width: 100%; height: 360px; }
+      label { display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px; }
+      input, select { padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; min-width: 240px; }
+      button { padding: 8px 12px; border: 1px solid #111827; background: #111827; color: #fff; border-radius: 6px; cursor: pointer; }
+      button.secondary { background: #fff; color: #111827; }
+      pre { background: #0b1020; color: #d1d5db; padding: 12px; border-radius: 8px; overflow: auto; }
+      ul { margin: 0; padding-left: 18px; }
+    </style>
+  </head>
+  <body>
+    <div class="row card" style="margin-bottom: 12px;">
+      <div>
+        <label>平台</label>
+        <select id="platform">
+          <option value="bilibili">bilibili</option>
+        </select>
+      </div>
+      <div>
+        <label>视频ID（任务里创建的 canonical video_id）</label>
+        <input id="video_id" placeholder="例如 BVxxxx / av123 / cid:123" />
+      </div>
+      <div class="row" style="gap: 8px;">
+        <button id="btnCrawl">创建抓取任务</button>
+        <button class="secondary" id="btnAnalyze">运行清洗+分析</button>
+        <button class="secondary" id="btnRefresh">刷新图表</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="card" style="flex: 1 1 640px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">弹幕量（10s）</div>
+        <div id="chartCount" class="chart"></div>
+      </div>
+      <div class="card" style="flex: 1 1 640px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">情感趋势（10s）</div>
+        <div id="chartSentiment" class="chart"></div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top: 12px;">
+      <div class="card" style="flex: 1 1 640px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">热词 Top50</div>
+        <div id="keywords"></div>
+      </div>
+      <div class="card" style="flex: 1 1 640px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">热词词云</div>
+        <div id="chartWordCloud" class="chart"></div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top: 12px;">
+      <div class="card" style="flex: 1 1 640px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">高能片段</div>
+        <div id="peaks"></div>
+      </div>
+      <div class="card" style="flex: 1 1 640px;">
+        <div style="font-weight: 700; margin-bottom: 8px;">指标说明</div>
+        <div style="color:#374151; line-height:1.6;">
+          <div>情感分析：基于分词与情绪词典规则，输出正向/负向/中性；“占比趋势”表示每个时间桶里该情绪占全部弹幕的比例。</div>
+          <div>用户活跃：独立用户数是去重后的发言用户数；Top10占比表示最活跃的10个用户贡献的弹幕比例，用来衡量是否被少数人“刷屏”。</div>
+          <div>用户分层：normal=普通用户（2~9条弹幕且重复率不高）；active=活跃用户（10~49条）；heavy=重度用户（≥50条）；low=低频用户（0~1条）；repeat_suspect=疑似重复刷屏；spam_suspect=疑似刷屏账号（高频且重复率偏高）。</div>
+          <div>认知负荷（词数/秒）：每10秒桶内的分词总数除以10，反映信息密度；信息熵反映词的多样性与均衡程度（越高越“内容丰富”）。</div>
+          <div>热词突增：某个词在短时间内突然大量出现的现象，用“突增强度”排序；常用于发现“梗”“名场面”。</div>
+          <div>提及网络：识别“@某人”的提及关系，统计提及最多的用户与被提及最多的对象。</div>
+          <div>弹幕类型：基于B站弹幕模式（滚动/顶部/底部/其他）的占比。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top: 12px;">
+      <div class="card" style="flex: 1 1 640px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">认知负荷（tokens/sec, 10s）</div>
+        <div id="chartCognitive" class="chart"></div>
+      </div>
+      <div class="card" style="flex: 1 1 640px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">信息熵（10s）</div>
+        <div id="chartEntropy" class="chart"></div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top: 12px;">
+      <div class="card" style="flex: 1 1 640px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">弹幕类型分布</div>
+        <div id="chartDanmuType" class="chart"></div>
+      </div>
+      <div class="card" style="flex: 1 1 640px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">用户分层</div>
+        <div id="userSegments"></div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top: 12px;">
+      <div class="card" style="flex: 1 1 640px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">提及网络（@）</div>
+        <div id="mentions"></div>
+      </div>
+      <div class="card" style="flex: 1 1 640px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">热词突增（burst）</div>
+        <div id="bursts"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 12px;">
+      <div style="font-weight: 600; margin-bottom: 8px;">日志</div>
+      <pre id="log"></pre>
+    </div>
+
+    <script>
+      const logEl = document.getElementById('log')
+      const platformEl = document.getElementById('platform')
+      const videoIdEl = document.getElementById('video_id')
+      function log(msg) { logEl.textContent = `[${new Date().toISOString()}] ${msg}\\n` + logEl.textContent }
+
+      async function api(path, options) {
+        const res = await fetch(path, options)
+        if (!res.ok) {
+          const text = await res.text()
+          throw new Error(`${res.status} ${text}`)
+        }
+        const ct = res.headers.get('content-type') || ''
+        if (ct.includes('application/json')) return await res.json()
+        return await res.text()
+      }
+
+      function formatVideoTime(sec) {
+        const s = Math.max(0, Math.floor(sec || 0))
+        const m = Math.floor(s / 60)
+        const r = s % 60
+        const mm = String(m).padStart(2, '0')
+        const ss = String(r).padStart(2, '0')
+        return `${mm}:${ss}`
+      }
+
+      async function refresh() {
+        const platform = platformEl.value
+        const video_id = videoIdEl.value.trim()
+        if (!video_id) { log('请先输入视频ID'); return }
+
+        const count = await api(`/analytics/time_series?platform=${encodeURIComponent(platform)}&video_id=${encodeURIComponent(video_id)}&metric_name=danmu_count&bucket_sec=10`)
+        const pos = await api(`/analytics/time_series?platform=${encodeURIComponent(platform)}&video_id=${encodeURIComponent(video_id)}&metric_name=sentiment_positive_ratio&bucket_sec=10`)
+        const neg = await api(`/analytics/time_series?platform=${encodeURIComponent(platform)}&video_id=${encodeURIComponent(video_id)}&metric_name=sentiment_negative_ratio&bucket_sec=10`)
+        const cog = await api(`/analytics/time_series?platform=${encodeURIComponent(platform)}&video_id=${encodeURIComponent(video_id)}&metric_name=cognitive_tokens_per_sec&bucket_sec=10`)
+        const ent = await api(`/analytics/time_series?platform=${encodeURIComponent(platform)}&video_id=${encodeURIComponent(video_id)}&metric_name=cognitive_entropy&bucket_sec=10`)
+        const kw = await api(`/analytics/summary?platform=${encodeURIComponent(platform)}&video_id=${encodeURIComponent(video_id)}&metric_name=top_keywords`)
+        const peaks = await api(`/analytics/summary?platform=${encodeURIComponent(platform)}&video_id=${encodeURIComponent(video_id)}&metric_name=high_energy_segments`)
+        const typeDist = await api(`/analytics/summary?platform=${encodeURIComponent(platform)}&video_id=${encodeURIComponent(video_id)}&metric_name=danmu_type_distribution`)
+        const seg = await api(`/analytics/summary?platform=${encodeURIComponent(platform)}&video_id=${encodeURIComponent(video_id)}&metric_name=danmu_user_segments`)
+        const mention = await api(`/analytics/summary?platform=${encodeURIComponent(platform)}&video_id=${encodeURIComponent(video_id)}&metric_name=danmu_mention_network`)
+        const burst = await api(`/analytics/summary?platform=${encodeURIComponent(platform)}&video_id=${encodeURIComponent(video_id)}&metric_name=danmu_bursty_tokens`)
+
+        renderCount(count)
+        renderSentiment(pos, neg)
+        renderCognitive(cog)
+        renderEntropy(ent)
+        renderKeywords(kw.value.items || [])
+        renderWordCloud(kw.value.items || [])
+        renderPeaks(peaks.value.segments || [])
+        renderDanmuType(typeDist.value.items || [])
+        renderUserSegments(seg.value.segment_counts || {}, seg.value.top_users || [])
+        renderMentions(mention.value)
+        renderBursts(burst.value.items || [])
+        log('刷新完成')
+      }
+
+      function renderCount(rows) {
+        const data = rows.map(r => [r.x_sec, r.value])
+        const chart = echarts.init(document.getElementById('chartCount'))
+        chart.setOption({
+          tooltip: {
+            trigger: 'axis',
+            formatter: (params) => {
+              const p = params && params[0]
+              if (!p || !p.value) return ''
+              return `${formatVideoTime(p.value[0])}<br/>弹幕条数：${p.value[1]}`
+            },
+          },
+          xAxis: {
+            type: 'value',
+            axisLabel: { formatter: (v) => formatVideoTime(v) },
+          },
+          yAxis: { type: 'value' },
+          series: [{ type: 'line', data, showSymbol: false, name: '弹幕条数' }],
+        })
+        window.addEventListener('resize', () => chart.resize())
+      }
+
+      function renderSentiment(pos, neg) {
+        const yPos = pos.map(r => [r.x_sec, r.value])
+        const yNeg = neg.map(r => [r.x_sec, r.value])
+        const chart = echarts.init(document.getElementById('chartSentiment'))
+        chart.setOption({
+          tooltip: {
+            trigger: 'axis',
+            formatter: (params) => {
+              if (!params || params.length === 0) return ''
+              const t = formatVideoTime(params[0].value[0])
+              const lines = params.map(p => `${p.seriesName}：${(p.value[1] * 100).toFixed(1)}%`)
+              return `${t}<br/>${lines.join('<br/>')}`
+            },
+          },
+          legend: { data: ['正向占比', '负向占比'] },
+          xAxis: { type: 'value', axisLabel: { formatter: (v) => formatVideoTime(v) } },
+          yAxis: { type: 'value', min: 0, max: 1 },
+          series: [
+            { type: 'line', data: yPos, showSymbol: false, name: '正向占比' },
+            { type: 'line', data: yNeg, showSymbol: false, name: '负向占比' },
+          ],
+        })
+        window.addEventListener('resize', () => chart.resize())
+      }
+
+      function renderKeywords(items) {
+        const container = document.getElementById('keywords')
+        const ul = document.createElement('ul')
+        for (const it of items) {
+          const li = document.createElement('li')
+          li.textContent = `${it.token}（出现次数：${it.count}）`
+          ul.appendChild(li)
+        }
+        container.innerHTML = ''
+        container.appendChild(ul)
+      }
+
+      function renderPeaks(segments) {
+        const container = document.getElementById('peaks')
+        const ul = document.createElement('ul')
+        for (const s of segments) {
+          const li = document.createElement('li')
+          li.textContent = `${s.start_sec}秒 ~ ${s.end_sec}秒（峰值弹幕量：${s.peak_count}）`
+          ul.appendChild(li)
+        }
+        container.innerHTML = ''
+        container.appendChild(ul)
+      }
+
+      function renderCognitive(rows) {
+        const data = rows.map(r => [r.x_sec, r.value])
+        const chart = echarts.init(document.getElementById('chartCognitive'))
+        chart.setOption({
+          tooltip: {
+            trigger: 'axis',
+            formatter: (params) => {
+              const p = params && params[0]
+              if (!p || !p.value) return ''
+              return `${formatVideoTime(p.value[0])}<br/>词数/秒：${p.value[1].toFixed(3)}`
+            },
+          },
+          xAxis: { type: 'value', axisLabel: { formatter: (v) => formatVideoTime(v) } },
+          yAxis: { type: 'value' },
+          series: [{ type: 'line', data, showSymbol: false, name: '词数/秒' }],
+        })
+        window.addEventListener('resize', () => chart.resize())
+      }
+
+      function renderEntropy(rows) {
+        const data = rows.map(r => [r.x_sec, r.value])
+        const chart = echarts.init(document.getElementById('chartEntropy'))
+        chart.setOption({
+          tooltip: {
+            trigger: 'axis',
+            formatter: (params) => {
+              const p = params && params[0]
+              if (!p || !p.value) return ''
+              return `${formatVideoTime(p.value[0])}<br/>信息熵：${p.value[1].toFixed(3)}`
+            },
+          },
+          xAxis: { type: 'value', axisLabel: { formatter: (v) => formatVideoTime(v) } },
+          yAxis: { type: 'value' },
+          series: [{ type: 'line', data, showSymbol: false, name: '信息熵' }],
+        })
+        window.addEventListener('resize', () => chart.resize())
+      }
+
+      function renderDanmuType(items) {
+        const chart = echarts.init(document.getElementById('chartDanmuType'))
+        chart.setOption({
+          tooltip: { trigger: 'item' },
+          series: [
+            {
+              type: 'pie',
+              radius: '65%',
+              data: items.map(i => ({ name: ({ scroll: '滚动', top: '顶部', bottom: '底部', other: '其他', unknown: '未知' }[i.type] || i.type), value: i.count })),
+              label: { formatter: '{b}: {c}' },
+            },
+          ],
+        })
+        window.addEventListener('resize', () => chart.resize())
+      }
+
+      function renderUserSegments(segmentCounts, topUsers) {
+        const container = document.getElementById('userSegments')
+        const label = (k) => ({
+          low: '低频用户',
+          normal: '普通用户',
+          active: '活跃用户',
+          heavy: '重度用户',
+          repeat_suspect: '疑似重复刷屏',
+          spam_suspect: '疑似刷屏账号',
+        }[k] || k)
+        const parts = []
+        const keys = Object.keys(segmentCounts || {}).sort()
+        parts.push('<div style=\"margin-bottom: 8px;\">')
+        for (const k of keys) {
+          parts.push(`<span style=\"display:inline-block; margin-right:12px;\">${label(k)}：${segmentCounts[k]}</span>`)
+        }
+        parts.push('</div>')
+        parts.push('<div style=\"font-weight:600; margin-bottom:6px;\">最活跃用户（部分）</div>')
+        parts.push('<ul>')
+        for (const u of (topUsers || []).slice(0, 10)) {
+          parts.push(`<li>${u.user_id_hash} 弹幕数=${u.count} 分层=${label(u.segment)}</li>`)
+        }
+        parts.push('</ul>')
+        container.innerHTML = parts.join('')
+      }
+
+      function renderMentions(value) {
+        const container = document.getElementById('mentions')
+        const topSenders = (value && value.top_senders) || []
+        const topTargets = (value && value.top_targets) || []
+        const parts = []
+        parts.push(`<div style=\"margin-bottom:8px;\">提及关系数=${value.edges || 0} 提及用户数=${value.unique_senders || 0} 被提及对象数=${value.unique_targets || 0}</div>`)
+        parts.push('<div style=\"display:flex; gap:12px; flex-wrap:wrap;\">')
+        parts.push('<div style=\"flex:1 1 300px;\"><div style=\"font-weight:600; margin-bottom:6px;\">提及最多的用户</div><ul>')
+        for (const it of topSenders.slice(0, 10)) {
+          parts.push(`<li>${it.user_id_hash} 提及次数=${it.out_mentions} 提及对象数=${it.unique_targets}</li>`)
+        }
+        parts.push('</ul></div>')
+        parts.push('<div style=\"flex:1 1 300px;\"><div style=\"font-weight:600; margin-bottom:6px;\">被提及最多的对象</div><ul>')
+        for (const it of topTargets.slice(0, 10)) {
+          parts.push(`<li>${it.target} 被提及次数=${it.in_mentions}</li>`)
+        }
+        parts.push('</ul></div>')
+        parts.push('</div>')
+        container.innerHTML = parts.join('')
+      }
+
+      function renderBursts(items) {
+        const container = document.getElementById('bursts')
+        const ul = document.createElement('ul')
+        for (const it of (items || []).slice(0, 20)) {
+          const li = document.createElement('li')
+          const seg = it.segment || {}
+          li.textContent = `${it.token} 突增强度=${it.z_score.toFixed(2)} 峰值次数=${it.peak_count} 峰值时间=${formatVideoTime(it.peak_bucket_start_sec)} 区间=${formatVideoTime(seg.start_sec || 0)}~${formatVideoTime(seg.end_sec || 0)}`
+          ul.appendChild(li)
+        }
+        container.innerHTML = ''
+        container.appendChild(ul)
+      }
+
+      function renderWordCloud(items) {
+        const chart = echarts.init(document.getElementById('chartWordCloud'))
+        const data = (items || []).slice(0, 80).map(it => ({ name: it.token, value: it.count }))
+        chart.setOption({
+          tooltip: { trigger: 'item', formatter: (p) => `${p.name}<br/>出现次数：${p.value}` },
+          series: [
+            {
+              type: 'wordCloud',
+              shape: 'circle',
+              left: 'center',
+              top: 'center',
+              width: '100%',
+              height: '100%',
+              sizeRange: [12, 64],
+              rotationRange: [-30, 30],
+              gridSize: 6,
+              drawOutOfBound: false,
+              textStyle: {
+                color: () => {
+                  const colors = ['#111827', '#1f2937', '#374151', '#4b5563', '#ef4444', '#f59e0b', '#10b981', '#3b82f6']
+                  return colors[Math.floor(Math.random() * colors.length)]
+                },
+              },
+              data,
+            },
+          ],
+        })
+        window.addEventListener('resize', () => chart.resize())
+      }
+
+      document.getElementById('btnRefresh').addEventListener('click', () => refresh().catch(e => log(e.message)))
+      document.getElementById('btnAnalyze').addEventListener('click', async () => {
+        const platform = platformEl.value
+        const video_id = videoIdEl.value.trim()
+        if (!video_id) { log('请先输入视频ID'); return }
+        const body = JSON.stringify({ platform, video_id })
+        log('开始运行清洗+分析')
+        try {
+          const res = await api('/analytics/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+          log(`pipeline_run_id=${res.pipeline_run_id}`)
+          await refresh()
+        } catch (e) {
+          log(e.message)
+        }
+      })
+      document.getElementById('btnCrawl').addEventListener('click', async () => {
+        const platform = platformEl.value
+        const video_input = videoIdEl.value.trim()
+        if (!video_input) { log('请先输入视频ID'); return }
+        const body = JSON.stringify({ platform, video_input, task_type: 'history' })
+        log('创建抓取任务')
+        try {
+          const res = await api('/tasks/crawl', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+          log(`task_id=${res.task_id} status=${res.status} video_id=${res.video_id}`)
+        } catch (e) {
+          log(e.message)
+        }
+      })
+    </script>
+  </body>
+</html>
