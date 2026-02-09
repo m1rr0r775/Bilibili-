@@ -139,3 +139,7 @@ curl -X POST "http://127.0.0.1:8000/report/html" ^
 ### 可运维性
 - GET `/stats/storage`：显示数据库大小、缓存大小、raw/clean/metrics 行数。
 - POST `/tasks/pause`、POST `/tasks/resume`：暂停/恢复后台抓取轮询。
+
+
+
+![127.0.0.1_8000_](E:\personal_project\danmu-analysis\127.0.0.1_8000_.png)
